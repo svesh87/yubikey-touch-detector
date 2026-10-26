@@ -1,0 +1,76 @@
+name: Debian package
+
+# Builds a .deb of an upstream release on Ubuntu 24.04 (noble) and publishes it as a
+# release of this fork: gh workflow run deb.yml --ref deb -f version=1.15.0
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Upstream tag to package, e.g. 1.15.0
+        required: true
+      revision:
+        description: Debian revision of the package
+        required: true
+        default: "1"
+
+permissions:
+  contents: read
+
+jobs:
+  deb:
+    name: Build ${{ inputs.version }}-${{ inputs.revision }} (noble, amd64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out packaging
+        uses: actions/checkout@v7
+        with:
+          path: packaging-repo
+
+      - name: Check out upstream ${{ inputs.version }}
+        uses: actions/checkout@v7
+        with:
+          repository: maximbaz/yubikey-touch-detector
+          ref: ${{ inputs.version }}
+          path: src
+
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: src/go.mod
+          cache-dependency-path: src/go.sum
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install libgpgme-dev libnotify-dev scdoc dpkg-dev
+
+      - name: Build package
+        env:
+          DEB_REVISION: ${{ inputs.revision }}
+        run: packaging-repo/packaging/deb/build-deb.sh src "${{ inputs.version }}" dist
+
+      - name: Install and run the package
+        run: |
+          sudo apt-get -y install ./dist/*.deb
+          yubikey-touch-detector -version
+          dpkg -L yubikey-touch-detector
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum *.deb > SHA256SUMS
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ inputs.version }}-deb${{ inputs.revision }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ inputs.version }} (deb ${{ inputs.revision }}, noble)
+          body: |
+            Upstream ${{ inputs.version }} of maximbaz/yubikey-touch-detector, built on Ubuntu 24.04 (noble) for amd64.
+            Install: `sudo apt install ./yubikey-touch-detector_*.deb`, then
+            `systemctl --user enable --now yubikey-touch-detector.service`.
+          files: dist/*
