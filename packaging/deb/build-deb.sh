@@ -29,8 +29,10 @@ gzip -9n "$root/pkg/usr/share/man/man1/$pkg.1"
 # Depends: the package owning each shared library the binary needs.
 depends=$(objdump -p "$root/pkg/usr/bin/$pkg" | awk '/NEEDED/ {print $2}' | while read -r lib; do
     path=$(ldconfig -p | awk -v l="$lib" '$1 == l && /x86-64|aarch64/ {print $NF; exit}')
-    dpkg -S "$path" 2>/dev/null | head -n 1 | cut -d: -f1
+    # dpkg knows files by their real /usr path (merged /usr), not via /lib symlinks.
+    dpkg -S "$(readlink -f "$path")" 2>/dev/null | head -n 1 | cut -d: -f1
 done | sort -u | paste -sd, - | sed 's/,/, /g')
+[ -n "$depends" ] || { echo "could not resolve runtime dependencies" >&2; exit 1; }
 
 size=$(du -sk "$root/pkg" | cut -f1)
 mkdir -p "$root/pkg/DEBIAN"
